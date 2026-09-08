@@ -9,6 +9,7 @@ import ru.corelia.auth.JwtVerifier;
 import ru.corelia.config.CoreliaConfig;
 import ru.corelia.http.ApiException;
 import ru.corelia.integration.PlatformHttp;
+import ru.corelia.support.LogJson;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -49,7 +50,8 @@ public class KeycloakIdentityProvider implements IdentityProvider {
                                 "scope",
                                 config.value(
                                         "PLATFORM_V_KEYCLOAK_SCOPE",
-                                        "openid profile email roles"))));
+                                        "openid profile email roles"))),
+                "Keycloak direct access token context");
     }
 
     public ObjectNode refresh(JsonNode body) {
@@ -66,7 +68,8 @@ public class KeycloakIdentityProvider implements IdentityProvider {
                                 "scope",
                                 config.value(
                                         "PLATFORM_V_KEYCLOAK_SCOPE",
-                                        "openid profile email roles"))));
+                                        "openid profile email roles"))),
+                "Keycloak refreshed access token context");
     }
 
     public void logout(JsonNode body) {
@@ -109,10 +112,11 @@ public class KeycloakIdentityProvider implements IdentityProvider {
                         "application/x-www-form-urlencoded"));
     }
 
-    private ObjectNode session(JsonNode tokens) {
+    private ObjectNode session(JsonNode tokens, String logMessage) {
         String token = text(tokens, "access_token");
         if (token.isEmpty()) throw new ApiException(502, "Keycloak не вернул access_token");
         long now = System.currentTimeMillis(), expires = number(tokens, "expires_in", 0);
+        var auth = verifier.authenticate("Bearer " + token);
         ObjectNode result =
                 object(
                         "accessToken",
@@ -124,7 +128,15 @@ public class KeycloakIdentityProvider implements IdentityProvider {
                         "expiresAt",
                         now + Math.max(0, expires) * 1000,
                         "user",
-                        verifier.authenticate("Bearer " + token).user());
+                        auth.user());
+        LogJson.info(
+                logMessage,
+                object(
+                        "username", auth.login(),
+                        "userId", auth.id(),
+                        "roleCount", auth.roles().size(),
+                        "expiresIn", expires,
+                        "hasRefreshToken", tokens.has("refresh_token")));
         Map.of(
                         "refresh_token",
                         "refreshToken",
